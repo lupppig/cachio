@@ -43,11 +43,9 @@ from diskcache import Cache
 from httpcache import HTTPCache
 
 if __name__ == "__main__":
-    # Initialize DiskCache for persistent storage
     c = Cache("cache")
     cache = HTTPCache(storage=c)
 
-    # Fetch a URL (serves from cache if already requested)
     response = cache.get("https://www.example.com/index.html")
 ```
 
@@ -57,4 +55,38 @@ if __name__ == "__main__":
 * Subsequent requests for the same URL are served from the cache.
 * You can replace `Cache("cache")` with an in-memory cache if persistence is not required.
 
-# NB This repo is under construction
+## Architecture Overview
+
+```
++------------------+
+|   User Request   |
++--------+---------+
+         |
+         v
++------------------+      Cache Lookup
+|  HTTPCache Core  |<--------------------+
++--------+---------+                     |
+         |                               |
+         v                               |
+  +------+-------+      Miss             |
+  | In-Memory LRU|---------------------->|
+  +------+-------+                        |
+         |                                |
+         v                                |
+  +------+-------+      Miss               |
+  |   DiskCache  |------------------------>|
+  +------+-------+                         |
+         |                                 |
+         v                                 |
+  +------+-------+                         |
+  |   HTTP Fetch |------------------------>|
+  +--------------+                         
+```
+
+**Description:**
+
+1. **In-Memory LRU Cache:** Fast retrieval for frequently accessed responses.
+2. **Disk Cache:** Fallback for responses that are no longer in memory but were cached previously.
+3. **HTTP Fetch:** Only triggered if the response is not available in memory or disk.
+
+## NB: This repo is under construction and isn't suitable for production yet...
