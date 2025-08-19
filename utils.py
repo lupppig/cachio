@@ -15,5 +15,5 @@ def check_date(dd: Response) -> datetime:
     dt_str = dd.headers.get("Date")
 
     if not dt_str:
-        raise DateDirectiveMissing("missind Date header")
+        raise DateDirectiveMissing("missing Date header")  # noqa: F821
     return to_date(dt_str)

@@ -1,11 +1,10 @@
 # An HTTPCache pacakge  for caching user request
 import hashlib
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
-from http.client import HTTPResponse
-from io import BytesIO
-from typing import Dict, List, Optional, Tuple
+from io import StringIO
+from typing import Dict, List, Tuple
 
 import diskcache as dc
 from requests import PreparedRequest, Response, Session
@@ -18,64 +17,67 @@ class Cache:
     def __init__(self, f_cache: str) -> None:
         self.cache_stor = dc.Cache(f_cache)
 
-    def get(self, cache_keys: str) -> bytes | None:
+    def get(self, cache_keys: str) -> Dict[str, str] | None:
         resp = self.cache_stor.get(cache_keys)
         if not resp:
             return None
-        print(resp)
         return resp
 
-    def set(self, cache_keys: str, body: bytes, ttl: int = 0) -> None:
-        self.cache_stor.set(cache_keys, body, ttl)
+    def set(self, cache_keys: str, cache_entry) -> None:
+        self.cache_stor.set(cache_keys, cache_entry)
 
     def delete(self, cache_keys: str) -> None:
         self.cache_stor.delete(cache_keys, retry=True)
 
-    def read_cache_resp(
-        self, cache_keys: str
-    ) -> Optional[Tuple[Dict[str, List[str]], bytes]]:
+    def read_cache_resp(self, cache_keys: str) -> Response | None:
         respBody = self.get(cache_keys=cache_keys)
         if respBody is None:
             return None
-
-        sock = BytesIO(respBody)
-        response = HTTPResponse(sock)
-        response.begin()
-        headers = self._get_headers_as_dict(response.getheaders())
-
-        body = response.read()
-
-        print(headers)
-        return headers, body
+        return self._build_response_from_cache(respBody)
 
     def _get_headers_as_dict(
         self, headers: List[Tuple[str, str]]
-    ) -> Dict[str, List[str, str]]:
+    ) -> Dict[str, List[str]]:
         raw_headers = headers
         headers = defaultdict(list)
         for key, value in raw_headers:
             headers[key].append(value)
         return dict(headers)
 
+    def _build_response_from_cache(
+        self, cache_resp: Dict[str, str]
+    ) -> Response:
+        resp = Response()
+        resp._content = cache_resp.get("body", bytes())
+        resp.status_code = cache_resp.get("status_code", 200)
+        resp.headers = CaseInsensitiveDict(cache_resp.get("headers", {}))
+        resp.url = cache_resp.get("url", "")
+        resp.reason = cache_resp.get("reason", "OK")
+        resp.encoding = cache_resp.get("encoding", None)
+
+        return resp
+
 
 class HTTPCache(Session):
     fresh = 1
     stale = 0
     X_CACHE = "X-Cache"
+    X_FROM_CACHE = "hits"
+    X_NOT_FROM_CACHE = "miss"
 
     def __init__(self, storage: Cache) -> None:
         super().__init__()
         self.storage = storage
-        self.x_from_cache = "hits"
-        self.x_not_from_cache = "miss"
 
     def _cache_keys(self, request: PreparedRequest) -> str:
         url = f"{request.method}:{request.url}"
         return hashlib.md5(url.encode()).hexdigest()
 
-    def _parse_cache_control(self, req: PreparedRequest) -> Dict[str, str]:
+    def _parse_cache_control(
+        self, req: PreparedRequest | Response
+    ) -> Dict[str, str | None]:
         cache_control = req.headers.get("cache-control")
-        cc: Dict[str, str] = {}
+        cc: Dict[str, str | None] = {}
         if not cache_control:
             return cc
         split_cc = cache_control.split(",")
@@ -83,14 +85,14 @@ class HTTPCache(Session):
             val = val.strip(" ")
             if "=" in val:
                 key, val = val.split("=")
-                cc[key] = val
+                cc[key.lower()] = val
             else:
-                cc[val] = ""
+                cc[val.lower()] = None
         return cc
 
     def _check_freshness(self, req: PreparedRequest, resp: Response) -> int:
-        reqCache = self._parse_cache_control(req.headers)
-        respCache = self._parse_cache_control(resp.headers)
+        reqCache = self._parse_cache_control(req)
+        respCache = self._parse_cache_control(resp)
 
         if reqCache.get("no-cache"):
             return 2
@@ -100,7 +102,7 @@ class HTTPCache(Session):
             return self.fresh
 
         date = check_date(resp)
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         current_age = (now - date).total_seconds()
 
         resp_max_age = respCache.get("max-age")
@@ -144,18 +146,21 @@ class HTTPCache(Session):
         cachable = (
             req.method == "GET" or req.method == "HEAD"
         ) and req.headers.get("range") is None
-        cacheResp, cacheBody = self.storage.read_cache_resp(cached_key)
+        cacheResp = self.storage.read_cache_resp(cached_key)
 
         if cacheResp and cachable:
-            req.headers[HTTPCache.X_CACHE] = self.x_from_cache
+            cacheResp.headers[HTTPCache.X_CACHE] = HTTPCache.X_FROM_CACHE
 
+        print("---------------->2")
         if self._feature_flag_matches(req, cacheResp) and (
             cachable and cacheResp
         ):
+            print("=================> 3")
             fresh = self._check_freshness(req, cacheResp)
             if fresh == self.fresh:
-                return self._build_response_from_cache(cacheResp, cacheBody)
+                return cacheResp
             else:
+                print("---------> 4")
                 newReq = req
                 changed = False
                 cache_etag = cacheResp.get("etag")
@@ -167,15 +172,43 @@ class HTTPCache(Session):
                 if lastmodifed_ and req.headers.get("last_modified"):
                     changed = True
                     newReq.headers["if-modified-since"] = lastmodifed_
-
                 if changed:
                     req = newReq
 
         resp = super().send(req, **kwargs)
+        print(resp.status_code, "---------> 5")
+        if resp.status_code == HTTPStatus.NOT_MODIFIED and cachable:
+            resp_headers = self._get_headers(resp)
+            cache_resp = cacheResp
+            for h in resp_headers:
+                cache_resp.headers[h] = resp.headers[h]
+            resp = cache_resp
 
-        if cachable and resp.status_code == HTTPStatus.NOT_MODIFIED:
-            ...
+        elif resp.status_code >= 500 and cachable and self.stale_error(resp):
+            cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
+            return cache_resp
+        else:
+            if resp.status_code != HTTPStatus.OK:
+                self.storage.delete(cached_key)
+                return resp
 
+        if (
+            cachable
+            and self._can_store(resp)
+            and resp.status_code == HTTPStatus.OK
+        ):
+            resp.headers[HTTPCache.X_CACHE] = HTTPCache.X_NOT_FROM_CACHE
+            resp.headers["X-Cache-Feature-Flag"] = "disk-cached"
+            cache_entry = {
+                "status_line": f"HTTP/{resp.raw.version / 10:.1f} {resp.status_code} {resp.reason}",
+                "url": resp.url,
+                "status_code": resp.status_code,
+                "headers": dict(resp.headers),
+                "body": resp.content,
+                "encoding": resp.encoding,
+                "timestamp": datetime.now().isoformat(),
+            }
+            self.storage.set(cached_key, cache_entry)
         return resp
 
     def _feature_flag_matches(
@@ -186,35 +219,72 @@ class HTTPCache(Session):
 
         return req_flag == resp_falg
 
-    def _build_response_from_cache(
-        cache_resp: Dict, cache_body: bytes
-    ) -> Response:
-        resp = Response()
-        resp.content = cache_body
-        resp.status_code = cache_resp.get("status_code", 200)
-        resp.headers = CaseInsensitiveDict(cache_resp.get("headers", {}))
-        resp.url = cache_resp.get("url", "")
-        resp.reason = cache_resp.get("reason", "OK")
-        resp.encoding = cache_resp.get("encoding", None)
+    def stale_error(self, resp: Response) -> bool:
+        stale = resp.headers.get("stale-if-error")
+        if not stale:
+            return False
 
-        return resp
+        response_time = check_date(resp)
+
+        current_age = (
+            datetime.now(timezone.utc) - response_time
+        ).total_seconds()
+        stale_sec = int(stale)
+        return current_age > stale_sec
 
     def _can_store(self, resp: Response) -> bool:
         return False if resp.headers.get("no-store") else True
 
-    # def _get_headers_as_dict(
-    #     self, r: Response | PreparedRequest
-    # ) -> Dict[str, List[str]]:
-    #     headers = r.headers
-    #     headers_dict = defaultdict(list)
-    #     for key, value in headers:
-    #         headers_dict[key.lower()].append(value)
-    #     return dict(headers_dict)
+    def _get_headers(self, resp: Response) -> List[str]:
+        hop_headers = [
+            "Connection",
+            "Keep-Alive",
+            "Proxy-Authenticate",
+            "Proxy-Authorization",
+            "TE",
+            "Trailer",
+            "Transfer-Encoding",
+            "Upgrade",
+        ]
+
+        # treat connection headers as hop-by-hop header also
+        if resp.headers.get("connection"):
+            conn_headers = resp.headers["connection"].split(",")
+            for c_header in conn_headers:
+                c_header = c_header.strip()
+                hop_headers.append(c_header)
+        header = [header for header in hop_headers if resp.headers.get(header)]
+        return header
+
+    def _construct_proper_response(self, resp: Response):
+        buffer = StringIO()
+
+        version = getattr(resp, "version", 11)
+        http_version = {10: "HTTP/1.0", 11: "HTTP/1.1", 20: "HTTP/2.0"}.get(
+            version, "HTTP/1.1"
+        )
+        buffer.write(f"{http_version} {resp.status_code} {resp.reason} \r\n")
+        for k, v in resp.headers:
+            buffer.write(f"{k}:{v}\r\n")
+        buffer.write("\r\n")
+        if resp.content:
+            try:
+                body = resp.content.decode(
+                    resp.encoding or "utf-8", errors="replace"
+                )
+            except Exception:
+                body = resp.content
+            if isinstance(body, str):
+                buffer.write(body)
+            else:
+                return buffer.getvalue().encode() + body
+        return buffer.getvalue()
 
 
 if "__main__" == __name__:
     c = Cache("cache")
     cache = HTTPCache(storage=c)
-    cache.get(
-        "https://www.example.com/path/to/resource?search=python&sort=asc#section1"
-    )
+    resp = cache.get("https://www.example.com/index.html")
+
+    print(resp.content)
+    print(resp.headers)
