@@ -20,7 +20,6 @@ class Cache:
         return dct_data
 
     def set(self, cache_keys: str, cache_entry) -> None:
-        print(type(cache_entry))
         j_entry = json.dumps(cache_entry)
         self.cache_stor.set(cache_keys, j_entry)
 

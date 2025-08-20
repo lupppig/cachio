@@ -248,12 +248,3 @@ class HTTPCache(Session):
             else:
                 return buffer.getvalue().encode() + body
         return buffer.getvalue()
-
-
-if "__main__" == __name__:
-    c = Cache("cache")
-    cache = HTTPCache(storage=c)
-    resp = cache.post("https://www.example.com/index.html")
-
-    print(resp.content)
-    print(resp.headers)

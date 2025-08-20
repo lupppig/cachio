@@ -38,17 +38,19 @@ class RedisCache(Cache):
                 print("Unable to connect to redis")
                 return
 
-    def set(self, cache_key: str, cache_entry):
+    def set(self, cache_keys: str, cache_entry):
         if self.red:
             j_data = json.dumps(cache_entry)
-            self.red.set(cache_key, j_data)
+            self.red.set(cache_keys, j_data)
 
-    def get(self, cache_key: str):
+    def get(self, cache_keys: str):
         if self.red:
-            data = self.red.get(cache_key)
+            data = self.red.get(cache_keys)
+            if not data:
+                return None
             s_data = json.loads(data)
             return s_data
 
-    def delete(self, cache_key: str):
+    def delete(self, cache_keys: str):
         if self.red:
-            self.red.delete(cache_key)
+            self.red.delete(cache_keys)
