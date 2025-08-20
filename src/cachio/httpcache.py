@@ -7,8 +7,8 @@ from typing import Dict, List
 
 from requests import PreparedRequest, Response, Session
 
-from cache import Cache
-from utils import check_date, to_date
+from .cache import Cache
+from .utils import check_date, to_date
 
 
 class HTTPCache(Session):

@@ -1,9 +1,9 @@
 import shutil
 import unittest
 
-from cache import Cache
-from httpcache import HTTPCache
-from redis_cache import RedisCache
+from cachio.cache import Cache
+from cachio.httpcache import HTTPCache
+from cachio.redis_cache import RedisCache
 
 
 class TestHTTPCache(unittest.TestCase):

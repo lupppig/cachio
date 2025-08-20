@@ -3,7 +3,7 @@ from email.utils import parsedate_to_datetime
 
 from requests import Response
 
-from error import DateDirectiveMissing
+from .error import DateDirectiveMissing
 
 
 def to_date(date: str) -> datetime:

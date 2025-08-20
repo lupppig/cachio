@@ -2,7 +2,7 @@ import json
 
 import redis
 
-from cache import Cache
+from .cache import Cache
 
 
 class RedisCache(Cache):

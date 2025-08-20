@@ -1,6 +1,6 @@
-# httpcache
+# cachio
 
-**httpcache** is an HTTP caching library for Python that enables efficient storage and retrieval of HTTP responses in both memory and on disk. It is designed to improve performance, reduce redundant network requests, and support persistent caching.
+**cachio** is an HTTP caching library for Python that enables efficient storage and retrieval of HTTP responses in both memory and on disk. It is designed to improve performance, reduce redundant network requests, and support persistent caching.
 
 ## Features
 
@@ -33,7 +33,13 @@
 ## Installation
 
 ```bash
-pip install httpcache
+pip install cachio
+```
+or if using uv
+
+
+```bash
+uv add  cachio
 ```
 
 ## Example Usage
