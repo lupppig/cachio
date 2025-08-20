@@ -2,7 +2,7 @@ import json
 
 import redis
 
-from httpcache import Cache
+from cache import Cache
 
 
 class RedisCache(Cache):
@@ -11,19 +11,24 @@ class RedisCache(Cache):
         host: str,
         port: int,
         password: str = "",
-        **kwargs,
+        **extra_conn,
     ):
         self.host = host
         self.port = port
         self.password = password
         self.red = None
-        if kwargs:
+        if extra_conn:
             self.red = redis.StrictRedis(
-                host=self.host, port=self.port, password=self.password, **kwargs
+                host=self.host,
+                port=self.port,
+                password=self.password,
+                **extra_conn,
             )
         else:
             self.red = redis.StrictRedis(
-                host=self.host, port=self.port, password=self.password, **kwargs
+                host=self.host,
+                port=self.port,
+                password=self.password,
             )
         if self.red:
             try:
@@ -33,14 +38,17 @@ class RedisCache(Cache):
                 print("Unable to connect to redis")
                 return
 
-    def set(self, cache_key: str, data):
-        j_data = json.dumps(data)
-        self.red.set(cache_key, j_data)
+    def set(self, cache_key: str, cache_entry):
+        if self.red:
+            j_data = json.dumps(cache_entry)
+            self.red.set(cache_key, j_data)
 
     def get(self, cache_key: str):
-        data = self.red.get(cache_key)
-        s_data = json.loads(data)
-        return s_data
+        if self.red:
+            data = self.red.get(cache_key)
+            s_data = json.loads(data)
+            return s_data
 
     def delete(self, cache_key: str):
-        self.red.delete(cache_key)
+        if self.red:
+            self.red.delete(cache_key)

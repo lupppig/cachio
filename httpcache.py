@@ -1,61 +1,14 @@
 # An HTTPCache pacakge  for caching user request
 import hashlib
-from collections import defaultdict
 from datetime import datetime, timezone
 from http import HTTPStatus
 from io import StringIO
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-import diskcache as dc
 from requests import PreparedRequest, Response, Session
-from requests.structures import CaseInsensitiveDict
 
+from cache import Cache
 from utils import check_date, to_date
-
-
-class Cache:
-    def __init__(self, f_cache: str) -> None:
-        self.cache_stor = dc.Cache(f_cache)
-
-    def get(self, cache_keys: str) -> Dict[str, str] | None:
-        resp = self.cache_stor.get(cache_keys)
-        if not resp:
-            return None
-        return resp
-
-    def set(self, cache_keys: str, cache_entry) -> None:
-        self.cache_stor.set(cache_keys, cache_entry)
-
-    def delete(self, cache_keys: str) -> None:
-        self.cache_stor.delete(cache_keys, retry=True)
-
-    def read_cache_resp(self, cache_keys: str) -> Response | None:
-        respBody = self.get(cache_keys=cache_keys)
-        if respBody is None:
-            return None
-        return self._build_response_from_cache(respBody)
-
-    def _get_headers_as_dict(
-        self, headers: List[Tuple[str, str]]
-    ) -> Dict[str, List[str]]:
-        raw_headers = headers
-        headers = defaultdict(list)
-        for key, value in raw_headers:
-            headers[key].append(value)
-        return dict(headers)
-
-    def _build_response_from_cache(
-        self, cache_resp: Dict[str, str]
-    ) -> Response:
-        resp = Response()
-        resp._content = cache_resp.get("body", bytes())
-        resp.status_code = cache_resp.get("status_code", 200)
-        resp.headers = CaseInsensitiveDict(cache_resp.get("headers", {}))
-        resp.url = cache_resp.get("url", "")
-        resp.reason = cache_resp.get("reason", "OK")
-        resp.encoding = cache_resp.get("encoding", None)
-
-        return resp
 
 
 class HTTPCache(Session):
@@ -69,9 +22,8 @@ class HTTPCache(Session):
         super().__init__()
         self.storage = storage
 
-    def _cache_keys(self, request: PreparedRequest) -> str:
-        url = f"{request.method}:{request.url}"
-        return hashlib.md5(url.encode()).hexdigest()
+    def _cache_keys(self, request: str) -> str:
+        return hashlib.md5(request.encode()).hexdigest()
 
     def _parse_cache_control(
         self, req: PreparedRequest | Response
@@ -142,7 +94,7 @@ class HTTPCache(Session):
         return self.fresh if fresh else self.stale
 
     def send(self, req: PreparedRequest, **kwargs) -> Response:
-        cached_key = self._cache_keys(req)
+        cached_key = self._cache_keys(req.url)
         cachable = (
             req.method == "GET" or req.method == "HEAD"
         ) and req.headers.get("range") is None
@@ -151,16 +103,11 @@ class HTTPCache(Session):
         if cacheResp and cachable:
             cacheResp.headers[HTTPCache.X_CACHE] = HTTPCache.X_FROM_CACHE
 
-        print("---------------->2")
-        if self._feature_flag_matches(req, cacheResp) and (
-            cachable and cacheResp
-        ):
-            print("=================> 3")
+        if self._check_match_request(req, cacheResp):
             fresh = self._check_freshness(req, cacheResp)
             if fresh == self.fresh:
                 return cacheResp
             else:
-                print("---------> 4")
                 newReq = req
                 changed = False
                 cache_etag = cacheResp.get("etag")
@@ -176,7 +123,6 @@ class HTTPCache(Session):
                     req = newReq
 
         resp = super().send(req, **kwargs)
-        print(resp.status_code, "---------> 5")
         if resp.status_code == HTTPStatus.NOT_MODIFIED and cachable:
             resp_headers = self._get_headers(resp)
             cache_resp = cacheResp
@@ -198,17 +144,18 @@ class HTTPCache(Session):
             and resp.status_code == HTTPStatus.OK
         ):
             resp.headers[HTTPCache.X_CACHE] = HTTPCache.X_NOT_FROM_CACHE
-            resp.headers["X-Cache-Feature-Flag"] = "disk-cached"
             cache_entry = {
                 "status_line": f"HTTP/{resp.raw.version / 10:.1f} {resp.status_code} {resp.reason}",
                 "url": resp.url,
                 "status_code": resp.status_code,
                 "headers": dict(resp.headers),
-                "body": resp.content,
+                "body": resp.content.decode(),
                 "encoding": resp.encoding,
                 "timestamp": datetime.now().isoformat(),
             }
             self.storage.set(cached_key, cache_entry)
+        else:
+            self.storage.delete(cached_key)
         return resp
 
     def _feature_flag_matches(
@@ -246,7 +193,6 @@ class HTTPCache(Session):
             "Transfer-Encoding",
             "Upgrade",
         ]
-
         # treat connection headers as hop-by-hop header also
         if resp.headers.get("connection"):
             conn_headers = resp.headers["connection"].split(",")
@@ -255,6 +201,29 @@ class HTTPCache(Session):
                 hop_headers.append(c_header)
         header = [header for header in hop_headers if resp.headers.get(header)]
         return header
+
+    def _check_match_request(
+        self, req: PreparedRequest, resp: Response
+    ) -> bool:
+        if not resp:
+            return False
+
+        req_url = self.normalize_url(req.url)
+        resp_url = self.normalize_url(resp.url)
+
+        return self._cache_keys(req_url) == self._cache_keys(resp_url)
+
+    def normalize_url(self, url: str) -> str:
+        from urllib.parse import parse_qsl, urlencode, urlparse
+
+        parsed = urlparse(url)
+        query = urlencode(sorted(parse_qsl(parsed.query)))
+
+        return (
+            f"{parsed.scheme}://{parsed.netloc}{parsed.path}?{query}"
+            if query
+            else f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        )
 
     def _construct_proper_response(self, resp: Response):
         buffer = StringIO()
@@ -284,7 +253,7 @@ class HTTPCache(Session):
 if "__main__" == __name__:
     c = Cache("cache")
     cache = HTTPCache(storage=c)
-    resp = cache.get("https://www.example.com/index.html")
+    resp = cache.post("https://www.example.com/index.html")
 
     print(resp.content)
     print(resp.headers)
