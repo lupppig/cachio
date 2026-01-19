@@ -1,4 +1,5 @@
 import hashlib
+import base64
 from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Dict, List, Optional, Union, Any
@@ -205,7 +206,7 @@ class HTTPCache(Session):
             "reason": resp.reason,
             "url": resp.url,
             "headers": dict(resp.headers),
-            "body": resp.content.decode('utf-8', errors='replace') if resp.content else "",
+            "body": base64.b64encode(resp.content).decode('ascii') if resp.content else "",
             "encoding": resp.encoding,
             "timestamp": datetime.now().isoformat(),
         }
@@ -219,9 +220,9 @@ class HTTPCache(Session):
         resp.encoding = entry.get("encoding")
         
         body = entry.get("body", "")
-        if isinstance(body, str):
-            resp._content = body.encode('utf-8')
+        if isinstance(body, str) and body:
+            resp._content = base64.b64decode(body)
         else:
-            resp._content = body
+            resp._content = b""
             
         return resp
