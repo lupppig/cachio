@@ -1,6 +1,14 @@
-from .cache import Cache
-from .error import DateDirectiveMissing
 from .httpcache import HTTPCache
-from .redis_cache import RedisCache
+from .interfaces import CacheBackend
+from .backends import InMemoryCache, DiskBackend, RedisBackend, MemcachedBackend
+from .error import DateDirectiveMissing
 
-__all__ = ["Cache", "HTTPCache", "RedisCache", "DateDirectiveMissing"]
+__all__ = [
+    "HTTPCache",
+    "CacheBackend",
+    "InMemoryCache",
+    "DiskBackend",
+    "RedisBackend",
+    "MemcachedBackend",
+    "DateDirectiveMissing"
+]
