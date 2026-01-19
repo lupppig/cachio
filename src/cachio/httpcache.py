@@ -1,6 +1,7 @@
 import hashlib
 import base64
-from datetime import datetime, timezone
+from datetime import datetime
+
 from http import HTTPStatus
 from typing import Dict, List, Optional, Union, Any
 
@@ -8,8 +9,7 @@ from requests import PreparedRequest, Response, Session
 from requests.structures import CaseInsensitiveDict
 
 from .interfaces import CacheBackend
-from .utils import check_date, to_date
-from .error import DateDirectiveMissing
+
 
 from .policy import (
     check_freshness,
