@@ -1,6 +1,6 @@
 import asyncio
 import json
-import time
+
 from typing import Dict, Any, Optional
 from ..interfaces import AsyncCacheBackend
 from .memory import InMemoryCache

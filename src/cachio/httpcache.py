@@ -11,12 +11,20 @@ from .interfaces import CacheBackend
 from .utils import check_date, to_date
 from .error import DateDirectiveMissing
 
-from .policy import check_freshness, check_stale_if_error, parse_cache_control, FRESH, STALE
+from .policy import (
+    check_freshness,
+    check_stale_if_error,
+    parse_cache_control,
+    FRESH,
+    STALE,
+)
+
 
 class HTTPCache(Session):
     """
     Subclass of requests.Session with tiered caching support.
     """
+
     FRESH = FRESH
     STALE = STALE
     X_CACHE = "X-Cache"
@@ -30,7 +38,7 @@ class HTTPCache(Session):
     def _cache_keys(self, request_url: str) -> str:
         return hashlib.md5(request_url.encode()).hexdigest()
 
-    def send(self, request: PreparedRequest, **kwargs: Any) -> Response: # type: ignore
+    def send(self, request: PreparedRequest, **kwargs: Any) -> Response:  # type: ignore
         """Send a request with caching logic."""
         if not request.url:
             return super().send(request, **kwargs)
@@ -51,12 +59,12 @@ class HTTPCache(Session):
                         break
                 except Exception:
                     continue
-        
+
         cache_resp: Optional[Response] = None
         if cache_entry:
             cache_resp = self._build_response_from_cache(cache_entry)
             cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE
-            
+
             if found_in_index > 0:
                 for i in range(found_in_index):
                     try:
@@ -67,17 +75,17 @@ class HTTPCache(Session):
         if cache_resp:
             req_headers = dict(request.headers) if request.headers else {}
             freshness = check_freshness(req_headers, dict(cache_resp.headers))
-            
+
             if freshness == self.FRESH:
                 return cache_resp
-            
+
             if request.headers is None:
                 request.headers = CaseInsensitiveDict()
-            
+
             etag = cache_resp.headers.get("etag")
             if etag:
                 request.headers["if-none-matched"] = etag
-            
+
             last_modified = cache_resp.headers.get("last-modified")
             if last_modified:
                 request.headers["if-modified-since"] = last_modified
@@ -90,43 +98,49 @@ class HTTPCache(Session):
         if resp.status_code == HTTPStatus.NOT_MODIFIED and cache_resp:
             for k, v in resp.headers.items():
                 cache_resp.headers[k] = v
-            
+
             new_entry = self._serialize_response(cache_resp)
             for backend in self.backends:
                 try:
                     backend.set(cached_key, new_entry)
                 except Exception:
                     pass
-            
-            cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE 
+
+            cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE
             return cache_resp
 
-        if resp.status_code >= 500 and cache_resp and check_stale_if_error(dict(cache_resp.headers)):
-             cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
-             return cache_resp
+        if (
+            resp.status_code >= 500
+            and cache_resp
+            and check_stale_if_error(dict(cache_resp.headers))
+        ):
+            cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
+            return cache_resp
 
         if cachable and resp.status_code == HTTPStatus.OK:
-             resp_cc = parse_cache_control(dict(resp.headers))
-             if "no-store" not in resp_cc:
-                 resp.headers[self.X_CACHE] = self.X_NOT_FROM_CACHE
-                 
-                 cache_entry = self._serialize_response(resp)
-                 
-                 for backend in self.backends:
-                     try:
+            resp_cc = parse_cache_control(dict(resp.headers))
+            if "no-store" not in resp_cc:
+                resp.headers[self.X_CACHE] = self.X_NOT_FROM_CACHE
+
+                cache_entry = self._serialize_response(resp)
+
+                for backend in self.backends:
+                    try:
                         backend.set(cached_key, cache_entry)
-                     except Exception:
+                    except Exception:
                         pass
-        
-        if resp.status_code != HTTPStatus.NOT_MODIFIED and resp.status_code != HTTPStatus.OK:
-             for backend in self.backends:
-                 try:
+
+        if (
+            resp.status_code != HTTPStatus.NOT_MODIFIED
+            and resp.status_code != HTTPStatus.OK
+        ):
+            for backend in self.backends:
+                try:
                     backend.delete(cached_key)
-                 except Exception:
+                except Exception:
                     pass
 
         return resp
-
 
     def _serialize_response(self, resp: Response) -> Dict[str, Any]:
         return {
@@ -134,7 +148,9 @@ class HTTPCache(Session):
             "reason": resp.reason,
             "url": resp.url,
             "headers": dict(resp.headers),
-            "body": base64.b64encode(resp.content).decode('ascii') if resp.content else "",
+            "body": base64.b64encode(resp.content).decode("ascii")
+            if resp.content
+            else "",
             "encoding": resp.encoding,
             "timestamp": datetime.now().isoformat(),
         }
@@ -146,11 +162,11 @@ class HTTPCache(Session):
         resp.url = entry.get("url", "")
         resp.headers = CaseInsensitiveDict(entry.get("headers", {}))
         resp.encoding = entry.get("encoding")
-        
+
         body = entry.get("body", "")
         if isinstance(body, str) and body:
             resp._content = base64.b64decode(body)
         else:
             resp._content = b""
-            
+
         return resp
