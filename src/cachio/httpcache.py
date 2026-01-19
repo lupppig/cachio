@@ -11,9 +11,14 @@ from .interfaces import CacheBackend
 from .utils import check_date, to_date
 from .error import DateDirectiveMissing
 
+from .policy import check_freshness, check_stale_if_error, parse_cache_control, FRESH, STALE
+
 class HTTPCache(Session):
-    FRESH = 1
-    STALE = 0
+    """
+    Subclass of requests.Session with tiered caching support.
+    """
+    FRESH = FRESH
+    STALE = STALE
     X_CACHE = "X-Cache"
     X_FROM_CACHE = "hits"
     X_NOT_FROM_CACHE = "miss"
@@ -25,83 +30,8 @@ class HTTPCache(Session):
     def _cache_keys(self, request_url: str) -> str:
         return hashlib.md5(request_url.encode()).hexdigest()
 
-    def _parse_cache_control(self, headers: CaseInsensitiveDict) -> Dict[str, Optional[str]]:
-        cache_control = headers.get("cache-control")
-        cc: Dict[str, Optional[str]] = {}
-        if not cache_control:
-            return cc
-        
-        split_cc = cache_control.split(",")
-        for val in split_cc:
-            val = val.strip()
-            if "=" in val:
-                key, value = val.split("=", 1)
-                cc[key.lower()] = value
-            else:
-                cc[val.lower()] = None
-        return cc
-
-    def _check_freshness(self, req: PreparedRequest, resp: Response) -> int:
-        req_headers = req.headers or CaseInsensitiveDict()
-        req_cc = self._parse_cache_control(req_headers)
-        resp_cc = self._parse_cache_control(resp.headers)
-
-        if "no-cache" in req_cc:
-            return 2
-        if "no-cache" in resp_cc:
-            return self.STALE
-        if "only-if-cached" in req_cc:
-            return self.FRESH
-
-        try:
-            date = check_date(resp)
-        except DateDirectiveMissing:
-            date = datetime.now(timezone.utc)
-            
-        now = datetime.now(timezone.utc)
-        current_age = (now - date).total_seconds()
-
-        resp_max_age = resp_cc.get("max-age")
-        if resp_max_age is not None:
-            try:
-                if current_age <= int(resp_max_age):
-                    fresh = True
-                else:
-                    fresh = False
-            except ValueError:
-                fresh = False
-        elif resp.headers.get("expires"):
-            expires_dt = to_date(resp.headers["expires"])
-            fresh = now <= expires_dt
-        else:
-            fresh = False
-
-        max_stale = req_cc.get("max-stale")
-        if not fresh and max_stale is not None:
-            if max_stale is None or max_stale == "":
-                fresh = True
-            else:
-                try:
-                    max_stale_sec = int(max_stale)
-                    if resp_max_age is not None:
-                         if current_age - int(resp_max_age) <= max_stale_sec:
-                             fresh = True
-                except ValueError:
-                    pass
-
-        min_fresh = req_cc.get("min-fresh")
-        if fresh and min_fresh is not None:
-            try:
-                min_fresh_sec = int(min_fresh)
-                if resp_max_age is not None:
-                    if int(resp_max_age) - current_age < min_fresh_sec:
-                        fresh = False
-            except ValueError:
-                pass
-
-        return self.FRESH if fresh else self.STALE
-
     def send(self, request: PreparedRequest, **kwargs: Any) -> Response: # type: ignore
+        """Send a request with caching logic."""
         if not request.url:
             return super().send(request, **kwargs)
 
@@ -129,7 +59,9 @@ class HTTPCache(Session):
                     self.backends[i].set(cached_key, cache_entry)
 
         if cache_resp:
-            freshness = self._check_freshness(request, cache_resp)
+            req_headers = dict(request.headers) if request.headers else {}
+            freshness = check_freshness(req_headers, dict(cache_resp.headers))
+            
             if freshness == self.FRESH:
                 return cache_resp
             
@@ -160,12 +92,12 @@ class HTTPCache(Session):
             cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE 
             return cache_resp
 
-        if resp.status_code >= 500 and cache_resp and self._stale_error_check(cache_resp):
+        if resp.status_code >= 500 and cache_resp and check_stale_if_error(dict(cache_resp.headers)):
              cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
              return cache_resp
 
         if cachable and resp.status_code == HTTPStatus.OK:
-             resp_cc = self._parse_cache_control(resp.headers)
+             resp_cc = parse_cache_control(dict(resp.headers))
              if "no-store" not in resp_cc:
                  resp.headers[self.X_CACHE] = self.X_NOT_FROM_CACHE
                  
@@ -180,25 +112,6 @@ class HTTPCache(Session):
 
         return resp
 
-    def _stale_error_check(self, resp: Response) -> bool:
-        cc = self._parse_cache_control(resp.headers)
-        stale_if_error = cc.get("stale-if-error")
-        if not stale_if_error:
-            return False
-            
-        try:
-            stale_window = int(stale_if_error)
-        except ValueError:
-            return False
-
-        try:
-            date = check_date(resp)
-        except DateDirectiveMissing:
-            date = datetime.now(timezone.utc)
-        now = datetime.now(timezone.utc)
-        age = (now - date).total_seconds()
-        
-        return age <= stale_window
 
     def _serialize_response(self, resp: Response) -> Dict[str, Any]:
         return {

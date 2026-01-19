@@ -5,12 +5,14 @@ dependencies = [
   "requests>=2.32.4",
   "requests-toolbelt>=1.0.0",
   "pymemcache>=4.0.0",
+  "httpx>=0.23.0",
+  "aiohttp>=3.8.0",
 ]
 description = "HTTP caching library for Python that supports in-memory and persistent storage, designed to speed up repeated requests and reduce redundant network calls."
 name = "cachio"
 readme = "README.md"
 requires-python = ">=3.11"
-version = "0.2.0"
+version = "0.3.0"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
