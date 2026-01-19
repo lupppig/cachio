@@ -1,5 +1,4 @@
 import random
-import asyncio
 from typing import Dict, Any, Optional
 from cachio.interfaces import AsyncCacheBackend
 

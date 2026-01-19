@@ -3,7 +3,7 @@ import base64
 from datetime import datetime
 
 from http import HTTPStatus
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Any
 
 from requests import PreparedRequest, Response, Session
 from requests.structures import CaseInsensitiveDict
