@@ -44,10 +44,13 @@ class HTTPCache(Session):
 
         if cachable:
             for i, backend in enumerate(self.backends):
-                cache_entry = backend.get(cached_key)
-                if cache_entry:
-                    found_in_index = i
-                    break
+                try:
+                    cache_entry = backend.get(cached_key)
+                    if cache_entry:
+                        found_in_index = i
+                        break
+                except Exception:
+                    continue
         
         cache_resp: Optional[Response] = None
         if cache_entry:
@@ -56,7 +59,10 @@ class HTTPCache(Session):
             
             if found_in_index > 0:
                 for i in range(found_in_index):
-                    self.backends[i].set(cached_key, cache_entry)
+                    try:
+                        self.backends[i].set(cached_key, cache_entry)
+                    except Exception:
+                        pass
 
         if cache_resp:
             req_headers = dict(request.headers) if request.headers else {}
@@ -87,7 +93,10 @@ class HTTPCache(Session):
             
             new_entry = self._serialize_response(cache_resp)
             for backend in self.backends:
-                backend.set(cached_key, new_entry)
+                try:
+                    backend.set(cached_key, new_entry)
+                except Exception:
+                    pass
             
             cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE 
             return cache_resp
@@ -104,11 +113,17 @@ class HTTPCache(Session):
                  cache_entry = self._serialize_response(resp)
                  
                  for backend in self.backends:
-                     backend.set(cached_key, cache_entry)
+                     try:
+                        backend.set(cached_key, cache_entry)
+                     except Exception:
+                        pass
         
         if resp.status_code != HTTPStatus.NOT_MODIFIED and resp.status_code != HTTPStatus.OK:
              for backend in self.backends:
-                 backend.delete(cached_key)
+                 try:
+                    backend.delete(cached_key)
+                 except Exception:
+                    pass
 
         return resp
 

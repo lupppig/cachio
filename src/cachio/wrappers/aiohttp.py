@@ -42,10 +42,13 @@ class AiohttpCacheSession(ClientSession):
 
         if cachable:
             for i, backend in enumerate(self.backends):
-                cache_entry = await backend.get(cached_key)
-                if cache_entry:
-                    found_in_index = i
-                    break
+                try:
+                    cache_entry = await backend.get(cached_key)
+                    if cache_entry:
+                        found_in_index = i
+                        break
+                except Exception:
+                    continue
 
         cache_resp: Optional[ClientResponse] = None
         if cache_entry:
@@ -59,7 +62,10 @@ class AiohttpCacheSession(ClientSession):
                  await resp.read() # Read body to cache it
                  entry = self._serialize_response(resp)
                  for backend in self.backends:
-                     await backend.set(cached_key, entry)
+                     try:
+                        await backend.set(cached_key, entry)
+                     except Exception:
+                        pass
         
         return resp
 

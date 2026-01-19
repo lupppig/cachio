@@ -57,10 +57,14 @@ class HttpxCacheClient:
 
         if cachable:
             for i, backend in enumerate(self.backends):
-                cache_entry = await backend.get(cached_key)
-                if cache_entry:
-                    found_in_index = i
-                    break
+                try:
+                    cache_entry = await backend.get(cached_key)
+                    if cache_entry:
+                        found_in_index = i
+                        break
+                except Exception:
+                    # Log error or silence it. Proceed to next backend.
+                    continue
 
         cache_resp: Optional[httpx.Response] = None
         if cache_entry:
@@ -69,7 +73,10 @@ class HttpxCacheClient:
             
             if found_in_index > 0:
                 for i in range(found_in_index):
-                    await self.backends[i].set(cached_key, cache_entry)
+                    try:
+                        await self.backends[i].set(cached_key, cache_entry)
+                    except Exception:
+                        pass
 
         if cache_resp:
             freshness = check_freshness(dict(req.headers), dict(cache_resp.headers))
@@ -100,7 +107,10 @@ class HttpxCacheClient:
                 cache_resp.headers[k] = v
             new_entry = self._serialize_response(cache_resp)
             for backend in self.backends:
-                await backend.set(cached_key, new_entry)
+                try:
+                    await backend.set(cached_key, new_entry)
+                except Exception:
+                    pass
             cache_resp.headers[self.X_CACHE] = self.X_FROM_CACHE 
             return cache_resp
             
@@ -115,11 +125,17 @@ class HttpxCacheClient:
                  await resp.aread() # Ensure content is read
                  entry = self._serialize_response(resp)
                  for backend in self.backends:
-                     await backend.set(cached_key, entry)
+                     try:
+                         await backend.set(cached_key, entry)
+                     except Exception:
+                         pass
         
         if resp.status_code != 304 and resp.status_code != 200:
              for backend in self.backends:
-                 await backend.delete(cached_key)
+                 try:
+                     await backend.delete(cached_key)
+                 except Exception:
+                     pass
 
         return resp
 
