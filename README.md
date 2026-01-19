@@ -45,21 +45,52 @@ uv add  cachio
 ## Example Usage
 
 ```python
-from diskcache import Cache
-from httpcache import HTTPCache
+from cachio import HTTPCache, InMemoryCache, DiskBackend, RedisBackend
 
 if __name__ == "__main__":
-    c = Cache("cache")
-    cache = HTTPCache(storage=c)
+    # Tiered caching: Memory -> Disk -> Redis
+    backends = [
+        InMemoryCache(max_size=100),
+        DiskBackend(cache_dir=".cache"),
+        RedisBackend(host="localhost", port=6379)
+    ]
+    cache = HTTPCache(backends=backends)
 
-    response = cache.get("https://www.example.com/index.html")
+    # First request hits network, subsequent ones hit cache
+    response = cache.get("https://www.example.com")
+    print(f"Status: {response.status_code}, Source: {response.headers.get('X-Cache')}")
 ```
 
-**Notes:**
+## Async Support
 
-* The first request fetches the response from the network.
-* Subsequent requests for the same URL are served from the cache.
-* You can replace `Cache("cache")` with an in-memory cache if persistence is not required.
+### Httpx
+
+```python
+import asyncio
+from cachio.wrappers import HttpxCacheClient
+from cachio.backends import AsyncInMemoryCache
+
+async def main():
+    async with HttpxCacheClient(backends=[AsyncInMemoryCache()]) as client:
+        await client.get("https://example.com")
+
+asyncio.run(main())
+```
+
+### Aiohttp
+
+```python
+import asyncio
+from cachio.wrappers import AiohttpCacheSession
+from cachio.backends import AsyncInMemoryCache
+
+async def main():
+    async with AiohttpCacheSession(backends=[AsyncInMemoryCache()]) as session:
+        async with session.get("https://example.com") as resp:
+            data = await resp.text()
+
+asyncio.run(main())
+```
 
 ## Architecture Overview
 
@@ -89,10 +120,4 @@ if __name__ == "__main__":
   +--------------+                         
 ```
 
-**Description:**
-
-1. **In-Memory LRU Cache:** Fast retrieval for frequently accessed responses.
-2. **Disk Cache:** Fallback for responses that are no longer in memory but were cached previously.
-3. **HTTP Fetch:** Only triggered if the response is not available in memory or disk.
-
-## NB: This repo is under construction and isn't suitable for production yet...
+**NB:** I am unable to publish this package to PyPI. Please install it directly from the source or git repository.
