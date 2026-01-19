@@ -4,12 +4,13 @@ dependencies = [
   "redis>=6.4.0",
   "requests>=2.32.4",
   "requests-toolbelt>=1.0.0",
+  "pymemcache>=4.0.0",
 ]
-description = "HTTP caching library for Python that supports in-memory and persistent storage, designed to speed up repeated requests and reduce redundant network calls.ea"
+description = "HTTP caching library for Python that supports in-memory and persistent storage, designed to speed up repeated requests and reduce redundant network calls."
 name = "cachio"
 readme = "README.md"
 requires-python = ">=3.11"
-version = "0.1.0"
+version = "0.2.0"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -17,4 +18,3 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 exclude = ["tests", "tests.*"]
-
