@@ -2,7 +2,7 @@ import hashlib
 import base64
 
 from datetime import datetime
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict, Optional, Iterable
 
 try:
     import httpx
@@ -20,11 +20,17 @@ class HttpxCacheClient:
     X_FROM_CACHE = "hits"
     X_NOT_FROM_CACHE = "miss"
 
-    def __init__(self, backends: List[AsyncCacheBackend], **kwargs: Any):
+    def __init__(
+        self,
+        backends: List[AsyncCacheBackend],
+        cacheable_status_codes: Iterable[int] = (200,),
+        **kwargs: Any
+    ):
         if httpx is None:
             raise ImportError("httpx is required. Install `httpx`.")
         self.client = httpx.AsyncClient(**kwargs)
         self.backends = backends
+        self.cacheable_status_codes = set(cacheable_status_codes)
 
     async def __aenter__(self):
         await self.client.__aenter__()
@@ -118,7 +124,7 @@ class HttpxCacheClient:
              cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
              return cache_resp
 
-        if cachable and resp.status_code == 200:
+        if cachable and resp.status_code in self.cacheable_status_codes:
              resp_cc = parse_cache_control(dict(resp.headers))
              if "no-store" not in resp_cc:
                  resp.headers[self.X_CACHE] = self.X_NOT_FROM_CACHE
@@ -130,7 +136,7 @@ class HttpxCacheClient:
                      except Exception:
                          pass
         
-        if resp.status_code != 304 and resp.status_code != 200:
+        if resp.status_code != 304 and resp.status_code not in self.cacheable_status_codes:
              for backend in self.backends:
                  try:
                      await backend.delete(cached_key)

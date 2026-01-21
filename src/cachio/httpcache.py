@@ -3,7 +3,7 @@ import base64
 from datetime import datetime
 
 from http import HTTPStatus
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Iterable
 
 from requests import PreparedRequest, Response, Session
 from requests.structures import CaseInsensitiveDict
@@ -31,9 +31,12 @@ class HTTPCache(Session):
     X_FROM_CACHE = "hits"
     X_NOT_FROM_CACHE = "miss"
 
-    def __init__(self, backends: List[CacheBackend]) -> None:
+    def __init__(
+        self, backends: List[CacheBackend], cacheable_status_codes: Iterable[int] = (200,)
+    ) -> None:
         super().__init__()
         self.backends = backends
+        self.cacheable_status_codes = set(cacheable_status_codes)
 
     def _cache_keys(self, request_url: str) -> str:
         return hashlib.md5(request_url.encode()).hexdigest()
@@ -117,7 +120,7 @@ class HTTPCache(Session):
             cache_resp.headers["Stale-Warning"] = '110 - "Response is stale"'
             return cache_resp
 
-        if cachable and resp.status_code == HTTPStatus.OK:
+        if cachable and resp.status_code in self.cacheable_status_codes:
             resp_cc = parse_cache_control(dict(resp.headers))
             if "no-store" not in resp_cc:
                 resp.headers[self.X_CACHE] = self.X_NOT_FROM_CACHE
@@ -132,7 +135,7 @@ class HTTPCache(Session):
 
         if (
             resp.status_code != HTTPStatus.NOT_MODIFIED
-            and resp.status_code != HTTPStatus.OK
+            and resp.status_code not in self.cacheable_status_codes
         ):
             for backend in self.backends:
                 try:
@@ -147,7 +150,7 @@ class HTTPCache(Session):
             "status_code": resp.status_code,
             "reason": resp.reason,
             "url": resp.url,
-            "headers": dict(resp.headers),
+            "headers": {k: v for k, v in resp.headers.items() if k.lower() != self.X_CACHE.lower()},
             "body": base64.b64encode(resp.content).decode("ascii")
             if resp.content
             else "",
